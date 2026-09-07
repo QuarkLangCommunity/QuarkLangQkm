@@ -15,7 +15,7 @@
     {
       "name": "cleg",
       "version": "1.0.0",
-      "url": "https://raw.githubusercontent.com/Enoch-199811/QuarkLangLibs-Cleg/master",
+      "url": "github://Enoch-199811/QuarkLangLibs-Cleg@master",
       "files": ["cleg.qk"]
     }
   ]
@@ -23,7 +23,7 @@
 ```
 
 - **files 字段**：库聚合只取列出的文件（不整库拖）——项目管理的核心聚合动作
-- url = 库根（GitHub raw / 任意 HTTP 静态地址）
+- url = 库根；官方协议 `github://owner/repo@ref`（qkm 经 GitHub API contents 拉取，避免 raw 域名网络差异）；`https://` 任意 HTTP 静态直下也支持
 - 官方库在仓库根放 `cup.json`（name/version/files 元数据），`qkm update` 依此做版本对比
 
 ## 命令

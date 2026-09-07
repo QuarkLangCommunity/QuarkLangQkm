@@ -19,6 +19,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -128,6 +129,72 @@ func loadCup() *Cup {
 	return &c
 }
 
+// fetchURL 拉取文件字节：https:// 直下；github://owner/repo/path 走 GitHub API contents（base64）。
+func fetchURL(url string, client *http.Client) ([]byte, error) {
+	if strings.HasPrefix(url, "github://") {
+		body := strings.TrimPrefix(url, "github://")
+		parts := strings.SplitN(body, "/", 3)
+		if len(parts) < 2 {
+			return nil, fmt.Errorf("github:// 需要 owner/repo[/path][@ref]")
+		}
+		ref := "master"
+		repo := parts[1]
+		if i := strings.Index(repo, "@"); i >= 0 {
+			ref = repo[i+1:]
+			repo = repo[:i]
+		}
+		rest := ""
+		if len(parts) == 3 {
+			rest = parts[2]
+		}
+		api := "https://api.github.com/repos/" + parts[0] + "/" + repo + "/contents/" + rest + "?ref=" + ref
+		req, _ := http.NewRequest("GET", api, nil)
+		req.Header.Set("Accept", "application/vnd.github+json")
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			return nil, fmt.Errorf("GitHub API %d: %s", resp.StatusCode, api)
+		}
+		var meta struct {
+			Content  string `json:"content"`
+			Encoding string `json:"encoding"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil {
+			return nil, err
+		}
+		if meta.Encoding == "base64" {
+			b, err := decodeBase64(meta.Content)
+			if err != nil {
+				return nil, err
+			}
+			return b, nil
+		}
+		return []byte(meta.Content), nil
+	}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, url)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+func decodeBase64(s string) ([]byte, error) {
+	s = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' {
+			return -1
+		}
+		return r
+	}, s)
+	return base64.StdEncoding.DecodeString(s)
+}
+
 // downloadFile 并发下载（缓存：.qkm/cache/<hash>，sha256 校验）。
 func downloadFile(url, dest string, client *http.Client) (string, error) {
 	sum := sha256.Sum256([]byte(url))
@@ -137,15 +204,7 @@ func downloadFile(url, dest string, client *http.Client) (string, error) {
 		os.WriteFile(dest, b, 0o644)
 		return key, nil // 缓存命中：零网络
 	}
-	resp, err := client.Get(url)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, url)
-	}
-	b, err := io.ReadAll(resp.Body)
+	b, err := fetchURL(url, client)
 	if err != nil {
 		return "", err
 	}
@@ -177,7 +236,11 @@ func buildProject(debug bool) error {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 8)
 	errs := make(chan error, len(jobs))
-	files := make([]string, 0, len(jobs))
+	type fpair struct {
+		src string
+		orb string
+	}
+	files := make([]fpair, 0, len(jobs))
 	var mu sync.Mutex
 	for _, j := range jobs {
 		wg.Add(1)
@@ -191,7 +254,7 @@ func buildProject(debug bool) error {
 				return
 			}
 			mu.Lock()
-			files = append(files, dest)
+			files = append(files, fpair{src: dest, orb: j.file})
 			mu.Unlock()
 		}(j)
 	}
@@ -204,7 +267,7 @@ func buildProject(debug bool) error {
 	die(os.RemoveAll("build"))
 	die(os.MkdirAll("build", 0o755))
 	for _, f := range files {
-		copyFile(f, filepath.Join("build", strings.TrimPrefix(filepath.Base(f), "")))
+		copyFile(f.src, filepath.Join("build", f.orb))
 	}
 	// src 文件复制进 build（main 优先聚合）
 	entries, _ := os.ReadDir("src")

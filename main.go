@@ -276,16 +276,20 @@ func buildProject(debug bool) error {
 	for _, e := range entries {
 		copyFile(filepath.Join("src", e.Name()), filepath.Join("build", e.Name()))
 	}
-	// 聚合产物：bin/<name>.qk = 聚合单文件（import 内联，独立可运行，无目录依赖）
+	// 聚合产物：bin/<name>/ = 多文件树（main.qk + 库文件原名原位，import 保留——库=源文件形态）
 	mainFile := filepath.Join("build", "main.qk")
 	if _, err := os.Stat(mainFile); err != nil {
 		die(fmt.Errorf("src/main.qk 缺失"))
 	}
 	binName := filepath.Join("bin", cup.Name)
-	aggregate := inlineAggregate(mainFile, files)
-	die(os.WriteFile(binName+".qk", []byte(aggregate), 0o644))
+	die(os.RemoveAll(binName))
+	die(os.MkdirAll(binName, 0o755))
+	copyFile(mainFile, filepath.Join(binName, "main.qk"))
+	for _, f := range files {
+		copyFile(f.src, filepath.Join(binName, f.orb))
+	}
 	// debug 模式：--debug 标记（聚合直接运行验证）
-	args := []string{binName + ".qk"}
+	args := []string{filepath.Join(binName, "main.qk")}
 	if debug {
 		args = append(args, "--debug")
 	}
@@ -310,38 +314,6 @@ func cmdBuild(args []string, debug bool) {
 	_ = args
 	die(buildProject(debug))
 	fmt.Println("✓ 聚合完成；编译产物: bin/" + loadCup().Name)
-}
-
-// inlineAggregate import 内联：库文件（去声明头）+ 主程序（去 import 行）拼接为单文件。
-func inlineAggregate(mainFile string, files []fpair) string {
-	var b strings.Builder
-	for _, f := range files {
-		content, err := os.ReadFile(f.src)
-		if err != nil {
-			die(err)
-		}
-		for _, line := range strings.Split(string(content), "\n") {
-			trim := strings.TrimSpace(line)
-			if strings.HasPrefix(trim, "program library") || strings.HasPrefix(trim, "//") {
-				continue // 剥库声明头与注释（内联合并）
-			}
-			b.WriteString(line)
-			b.WriteString("\n")
-		}
-	}
-	main, err := os.ReadFile(mainFile)
-	if err != nil {
-		die(err)
-	}
-	for _, line := range strings.Split(string(main), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "import ") {
-			continue // 内联：移除 import 语句
-		}
-		b.WriteString(line)
-		b.WriteString("\n")
-	}
-	return b.String()
 }
 
 func copyFile(src, dst string) {

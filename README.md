@@ -31,7 +31,8 @@
 ```sh
 qkm init                 # 初始化（cup.json + src/main.qk）
 qkm build                # 聚合编译：并发下载（.qkm/cache 哈希缓存，命中零网络）
-                         # → vendor/（files 隔离）→ build/ 聚合树 → quark 编译校验 → bin/<name>.qk
+                         # → vendor/（files 隔离）→ build/ 聚合树 → quark 编译校验 → bin/<name>/（多文件产物：
+                         #   main.qk + 库文件原名原位，import 保留；cd bin/<name> && quark main.qk 即运行）
 qkm debug [-bp 12]       # 调试：构建 + 断点运行（调用 qkd/quark 调试模式；c/n/p var/q）
 qkm update               # 刷新依赖版本（远程 cup.json 对比）
 qkm install              # 自动安装微服务三件：qkc / quark / qkd（$HOME/.local/bin）

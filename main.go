@@ -354,19 +354,19 @@ func cmdInstall(args []string) {
 	// 1) qkc（语言 + 编译器，官方主仓）
 	fmt.Println("→ 微服务 qkc（QuarkLangQkc 主仓）")
 	qkcDir := filepath.Join(tmp, "qkc")
-	runCmd("git", "clone", "--depth", "1", "https://github.com/Enoch-199811/QuarkLangQkc", qkcDir)
+	runCmd("git", "clone", "--depth", "1", "https://github.com/QuarkLangCommunity/QuarkLangQkc", qkcDir)
 	runCmd("go", "build", "-o", filepath.Join(binDir, "qkc"), "./compiler", "-C", qkcDir, "-C", qkcDir)
 	// 2) quark（运行时，微服务仓）
 	fmt.Println("→ 微服务 quark（QuarkLangQuark）")
 	quarkDir := filepath.Join(tmp, "quark")
-	runCmd("git", "clone", "--depth", "1", "https://github.com/Enoch-199811/QuarkLangQuark", quarkDir)
+	runCmd("git", "clone", "--depth", "1", "https://github.com/QuarkLangCommunity/QuarkLangQuark", quarkDir)
 	_ = quarkDir
 	// quark 从主仓构建（主仓入口）：
 	runCmd("go", "build", "-o", filepath.Join(binDir, "quark"), qkcDir)
 	// 3) qkd（调试器，微服务仓）
 	fmt.Println("→ 微服务 qkd（QuarkLangQkd）")
 	qkdDir := filepath.Join(tmp, "qkd")
-	runCmd("git", "clone", "--depth", "1", "https://github.com/Enoch-199811/QuarkLangQkd", qkdDir)
+	runCmd("git", "clone", "--depth", "1", "https://github.com/QuarkLangCommunity/QuarkLangQkd", qkdDir)
 	runCmd("go", "build", "-o", filepath.Join(binDir, "qkd"), qkdDir)
 	fmt.Println("✓ 微服务已安装:", binDir, "(qkc / quark / qkd)")
 	fmt.Println("  提示: 将", binDir, "加入 PATH")

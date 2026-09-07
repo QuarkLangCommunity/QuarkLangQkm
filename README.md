@@ -15,7 +15,7 @@
     {
       "name": "cleg",
       "version": "1.0.0",
-      "url": "github://Enoch-199811/QuarkLangLibs-Cleg@master",
+      "url": "github://QuarkLangCommunity/QuarkLangLibs-Cleg@master",
       "files": ["cleg.qk"]
     }
   ]

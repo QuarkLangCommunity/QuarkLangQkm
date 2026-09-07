@@ -81,6 +81,8 @@ func main() {
 			die(err)
 		}
 		runDebug(*bp, fs.Args())
+	case "inline":
+		cmdInline(os.Args[2:])
 	case "install":
 		cmdInstall(os.Args[2:])
 	case "update":
@@ -96,6 +98,7 @@ func usage() {
   qkm init                初始化项目（cup.json + src/main.qk）
   qkm build               聚合编译（下载/缓存依赖文件 → vendor → quark 编译）
   qkm debug [-bp file:l]  调试模式（编译 + 断点运行；命令 c/n/p var/q）
+  qkm inline <dir>... [-o out]   多目录视为单一目录编译（临时软链接平铺）
   qkm update              刷新依赖（远程 cup.json 版本对比）
   qkm install             安装 qkc 工具集（quark/qkc 自动构建）`)
 }
@@ -332,6 +335,78 @@ func quarkBin() string {
 		return "./quark"
 	}
 	return "quark"
+}
+
+// ---------- inline（多目录 → 软链接单目录） ----------
+
+// cmdInline 把多个目录下的 .qk 以软链接平铺到同一目录（import 相对解析骗过编译器）。
+func cmdInline(args []string) {
+	out := filepath.Join(".qkm", "inline")
+	var srcs []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-o":
+			if i+1 < len(args) {
+				out = args[i+1]
+				i++
+			}
+		default:
+			srcs = append(srcs, args[i])
+		}
+	}
+	if len(srcs) == 0 {
+		die(fmt.Errorf("用法: qkm inline <dir>... [-o out]"))
+	}
+	die(os.RemoveAll(out))
+	die(os.MkdirAll(out, 0o755))
+	used := map[string]bool{}
+	var files []string
+	for _, src := range srcs {
+		die(filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(p))
+			if ext != ".qk" && ext != ".qlib" {
+				return nil
+			}
+			name := info.Name()
+			if used[name] {
+				// 冲突唯一化：<base>_<dir>.<ext>
+				name = strings.TrimSuffix(name, ext) + "_" + sanitize(filepath.Base(filepath.Dir(p))) + ext
+				k := 2
+				for used[name] {
+					name = strings.TrimSuffix(name, ext) + fmt.Sprintf("_%d", k) + ext
+					k++
+				}
+			}
+			used[name] = true
+			die(os.Symlink(p, filepath.Join(out, name)))
+			files = append(files, name)
+			return nil
+		}))
+	}
+	fmt.Printf("✓ inline: %d 个文件软链接平铺 → %s（同一目录编译）\n", len(files), out)
+	// 提示：找到 main 入口
+	for _, f := range files {
+		if f == "main.qk" || strings.HasSuffix(f, "main.qk") {
+			fmt.Println("  入口: ", filepath.Join(out, f))
+			break
+		}
+	}
+}
+
+func sanitize(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "lib"
+	}
+	return b.String()
 }
 
 // ---------- debug ----------

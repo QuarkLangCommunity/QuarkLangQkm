@@ -50,6 +50,12 @@ type Cup struct {
 	Dependencies []Dep  `json:"dependencies"`
 }
 
+// fpair 聚合文件对：vendor 路径 → 原始库文件名。
+type fpair struct {
+	src string
+	orb string
+}
+
 func die(err error) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "qkm:", err)
@@ -236,10 +242,6 @@ func buildProject(debug bool) error {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 8)
 	errs := make(chan error, len(jobs))
-	type fpair struct {
-		src string
-		orb string
-	}
 	files := make([]fpair, 0, len(jobs))
 	var mu sync.Mutex
 	for _, j := range jobs {
@@ -274,15 +276,16 @@ func buildProject(debug bool) error {
 	for _, e := range entries {
 		copyFile(filepath.Join("src", e.Name()), filepath.Join("build", e.Name()))
 	}
-	// 聚合产物：bin/<name>.qk（聚合源码，qkc 编译入口）+ 调用 quark 校验运行
+	// 聚合产物：bin/<name>.qk = 聚合单文件（import 内联，独立可运行，无目录依赖）
 	mainFile := filepath.Join("build", "main.qk")
 	if _, err := os.Stat(mainFile); err != nil {
 		die(fmt.Errorf("src/main.qk 缺失"))
 	}
 	binName := filepath.Join("bin", cup.Name)
-	copyFile(mainFile, binName+".qk")
+	aggregate := inlineAggregate(mainFile, files)
+	die(os.WriteFile(binName+".qk", []byte(aggregate), 0o644))
 	// debug 模式：--debug 标记（聚合直接运行验证）
-	args := []string{mainFile}
+	args := []string{binName + ".qk"}
 	if debug {
 		args = append(args, "--debug")
 	}
@@ -307,6 +310,38 @@ func cmdBuild(args []string, debug bool) {
 	_ = args
 	die(buildProject(debug))
 	fmt.Println("✓ 聚合完成；编译产物: bin/" + loadCup().Name)
+}
+
+// inlineAggregate import 内联：库文件（去声明头）+ 主程序（去 import 行）拼接为单文件。
+func inlineAggregate(mainFile string, files []fpair) string {
+	var b strings.Builder
+	for _, f := range files {
+		content, err := os.ReadFile(f.src)
+		if err != nil {
+			die(err)
+		}
+		for _, line := range strings.Split(string(content), "\n") {
+			trim := strings.TrimSpace(line)
+			if strings.HasPrefix(trim, "program library") || strings.HasPrefix(trim, "//") {
+				continue // 剥库声明头与注释（内联合并）
+			}
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+	}
+	main, err := os.ReadFile(mainFile)
+	if err != nil {
+		die(err)
+	}
+	for _, line := range strings.Split(string(main), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "import ") {
+			continue // 内联：移除 import 语句
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 func copyFile(src, dst string) {

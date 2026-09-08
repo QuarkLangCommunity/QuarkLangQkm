@@ -482,17 +482,13 @@ func runDebug(bp string, args []string) {
 
 // ---------- install（微服务三件：quark / qkc / qkd） ----------
 
-// cmdInstall：默认按 cup.json 补全依赖（build 已内联同逻辑）；-tools 安装微服务三件。
+// cmdInstall：无参数 = 按 cup.json 补全依赖；-tools = 安装微服务三件。
 func cmdInstall(args []string) {
-	if len(args) > 0 && args[0] == "-tools" {
+	if len(args) > 0 && (args[0] == "-tools" || args[0] == "tools") {
 		installTools()
 		return
 	}
-	if len(args) > 0 && args[0] == "tools" {
-		installTools()
-		return
-	}
-	// 依赖补全：直接调用聚合下载（与 build 一致），不编译
+	// 依赖补全（空参数）：与 build 的下载阶段一致，不编译
 	cup := loadCup()
 	client := &http.Client{Timeout: 30 * time.Second}
 	if len(cup.Dependencies) == 0 {

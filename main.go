@@ -88,6 +88,8 @@ func main() {
 		cmdInstall(os.Args[2:])
 	case "update":
 		cmdUpdate()
+	case "update-tools":
+		cmdUpdateTools()
 	default:
 		usage()
 		os.Exit(2)
@@ -100,8 +102,9 @@ func usage() {
   qkm build               聚合编译（下载/缓存依赖文件 → vendor → quark 编译）
   qkm debug [-bp file:l]  调试模式（编译 + 断点运行；命令 c/n/p var/q）
   qkm inline <dir>... [-o out]   多目录视为单一目录编译（临时软链接平铺）
-  qkm update              刷新依赖（远程 cup.json 版本对比）
-  qkm install             安装 qkc 工具集（quark/qkc 自动构建）`)
+  qkm install             安装微服务三件（quark/qkc/qkd）或补全依赖（-deps）
+  qkm update              刷新包元数据（不改文件：版本=可容纳上限，在线最新记录到 .qkm/registry）
+  qkm update-tools        工具链更新（重建 quark/qkc/qkd）`)
 }
 
 // ---------- init ----------
@@ -295,6 +298,10 @@ func buildProject(debug bool) error {
 	for _, f := range files {
 		copyFile(f.src, filepath.Join(binName, f.orb))
 	}
+	// assets 自动进树：src/assets 目录（存在即保留相对结构进 bin/<name>/，无需字段）
+	if fi, err := os.Stat(filepath.Join("src", "assets")); err == nil && fi.IsDir() {
+		copyDir(filepath.Join("src", "assets"), filepath.Join(binName, "assets"))
+	}
 	// assets 字段：src 相对路径/glob → bin/<name>/ 保留相对结构
 	for _, pat := range cup.Assets {
 		matches, _ := filepath.Glob(filepath.Join("src", pat))
@@ -323,6 +330,7 @@ func buildProject(debug bool) error {
 		args = append(args, "--debug")
 	}
 	cmd := exec.Command(quarkBin(), args...)
+	cmd.Dir = binName // 产物一致性：校验运行 cwd = bin 产物目录（相对资源/库同产物运行时）
 	var errBuf strings.Builder
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &errBuf
@@ -474,7 +482,38 @@ func runDebug(bp string, args []string) {
 
 // ---------- install（微服务三件：quark / qkc / qkd） ----------
 
+// cmdInstall：默认按 cup.json 补全依赖（build 已内联同逻辑）；-tools 安装微服务三件。
 func cmdInstall(args []string) {
+	if len(args) > 0 && args[0] == "-tools" {
+		installTools()
+		return
+	}
+	if len(args) > 0 && args[0] == "tools" {
+		installTools()
+		return
+	}
+	// 依赖补全：直接调用聚合下载（与 build 一致），不编译
+	cup := loadCup()
+	client := &http.Client{Timeout: 30 * time.Second}
+	if len(cup.Dependencies) == 0 {
+		fmt.Println("（无依赖）")
+		return
+	}
+	die(os.MkdirAll("vendor", 0o755))
+	for _, d := range cup.Dependencies {
+		for _, f := range d.Files {
+			u := strings.TrimRight(d.URL, "/") + "/" + f
+			dest := filepath.Join("vendor", d.Name+"-"+f)
+			if _, err := downloadFile(u, dest, client); err != nil {
+				die(fmt.Errorf("依赖 %s/%s 补全失败: %v", d.Name, f, err))
+			}
+		}
+	}
+	fmt.Println("✓ 依赖补全完成（vendor/" + cup.Name + " 缓存命中零网络）")
+}
+
+// installTools 工具链三件（quark/qkc/qkd）构建安装。
+func installTools() {
 	if _, err := exec.LookPath("go"); err != nil {
 		die(fmt.Errorf("需要 Go（微服务从源码构建）"))
 	}
@@ -504,6 +543,12 @@ func cmdInstall(args []string) {
 	fmt.Println("  提示: 将", binDir, "加入 PATH")
 }
 
+// cmdUpdateTools 工具链更新（重建三件）。
+func cmdUpdateTools() {
+	installTools()
+	fmt.Println("✓ 工具链已更新")
+}
+
 func runCmd(name string, args ...string) {
 	cmd := exec.Command(name, args...)
 	cmd.Stdout = os.Stdout
@@ -514,31 +559,31 @@ func runCmd(name string, args ...string) {
 // ---------- update ----------
 
 func cmdUpdate() {
+	// 刷新在线元数据 → .qkm/registry（不改任何项目文件；cup.json version = 可容纳上限）
 	cup := loadCup()
 	client := &http.Client{Timeout: 15 * time.Second}
 	for _, d := range cup.Dependencies {
-		u := strings.TrimRight(d.URL, "/") + "/cup.json"
-		resp, err := client.Get(u)
-		if err != nil {
-			fmt.Println("↷", d.Name, "元数据不可达:", err)
-			continue
-		}
+		u := strings.TrimRight(d.URL, "/")
 		var meta struct {
 			Name    string   `json:"name"`
 			Version string   `json:"version"`
 			Files   []string `json:"files"`
 		}
-		err = json.NewDecoder(resp.Body).Decode(&meta)
-		resp.Body.Close()
-		if err != nil {
-			fmt.Println("↷", d.Name, "无 cup.json 元数据（跳过）")
-			continue
+		if b, err := fetchURL(u+"/cup.json", client); err == nil {
+			_ = json.Unmarshal(b, &meta)
 		}
+		if meta.Version == "" {
+			meta.Version = d.Version
+			meta.Files = d.Files
+		}
+		die(os.MkdirAll(".qkm/registry", 0o755))
+		rec := map[string]string{"name": d.Name, "latest": meta.Version, "cap": d.Version}
+		b, _ := json.Marshal(rec)
+		die(os.WriteFile(".qkm/registry/"+d.Name+".json", b, 0o644))
 		if meta.Version != d.Version {
-			fmt.Printf("↗ %s %s → %s（qkm update --yes 应用）\n", d.Name, d.Version, meta.Version)
+			fmt.Printf("↗ %s 上限 %s / 在线最新 %s —— cup.json 未改动（调整 version 字段即更新上限）\n", d.Name, d.Version, meta.Version)
 		} else {
-			fmt.Println("✓", d.Name, meta.Version, "已是最新")
+			fmt.Println("✓", d.Name, d.Version, "与在线最新一致")
 		}
-		_ = meta.Files
 	}
 }

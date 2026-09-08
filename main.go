@@ -324,8 +324,8 @@ func buildProject(debug bool) error {
 			copyFile(m, dst)
 		}
 	}
-	// 编译校验（quark 编译/运行校验通过即产物就绪）
-	args := []string{filepath.Join(binName, "main.qk")}
+	// 编译校验（quark 编译/运行校验通过即产物就绪；cwd=binName → 相对文件名）
+	args := []string{"main.qk"}
 	if debug {
 		args = append(args, "--debug")
 	}

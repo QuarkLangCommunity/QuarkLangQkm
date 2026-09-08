@@ -44,10 +44,11 @@ type Dep struct {
 }
 
 type Cup struct {
-	Name         string `json:"name"`
-	Version      string `json:"version"`
-	QuarkVersion string `json:"quark"`
-	Dependencies []Dep  `json:"dependencies"`
+	Name         string   `json:"name"`
+	Version      string   `json:"version"`
+	QuarkVersion string   `json:"quark"`
+	Dependencies []Dep    `json:"dependencies"`
+	Assets       []string `json:"assets"` // 资源（相对 src 的路径/glob）：复制进 bin/<name>/ 保留相对结构
 }
 
 // fpair 聚合文件对：vendor 路径 → 原始库文件名。
@@ -277,6 +278,9 @@ func buildProject(debug bool) error {
 	// src 文件复制进 build（main 优先聚合）
 	entries, _ := os.ReadDir("src")
 	for _, e := range entries {
+		if e.IsDir() {
+			continue // assets 等目录：构建树不需要（bin 由 assets 字段处理）
+		}
 		copyFile(filepath.Join("src", e.Name()), filepath.Join("build", e.Name()))
 	}
 	// 聚合产物：bin/<name>/ = 多文件树（main.qk + 库文件原名原位，import 保留——库=源文件形态）
@@ -291,19 +295,37 @@ func buildProject(debug bool) error {
 	for _, f := range files {
 		copyFile(f.src, filepath.Join(binName, f.orb))
 	}
-	// debug 模式：--debug 标记（聚合直接运行验证）
+	// assets 字段：src 相对路径/glob → bin/<name>/ 保留相对结构
+	for _, pat := range cup.Assets {
+		matches, _ := filepath.Glob(filepath.Join("src", pat))
+		if len(matches) == 0 {
+			if fi, err := os.Stat(filepath.Join("src", pat)); err == nil && fi.IsDir() {
+				matches, _ = filepath.Glob(filepath.Join("src", pat, "**", "*"))
+				_ = matches
+			}
+			matches = nil
+			if fi, err := os.Stat(filepath.Join("src", pat)); err == nil && fi.IsDir() {
+				_ = fi
+				copyDir(filepath.Join("src", pat), filepath.Join(binName, pat))
+				continue
+			}
+		}
+		for _, m := range matches {
+			rel, _ := filepath.Rel("src", m)
+			dst := filepath.Join(binName, rel)
+			die(os.MkdirAll(filepath.Dir(dst), 0o755))
+			copyFile(m, dst)
+		}
+	}
+	// 编译校验（quark 编译/运行校验通过即产物就绪）
 	args := []string{filepath.Join(binName, "main.qk")}
 	if debug {
 		args = append(args, "--debug")
 	}
 	cmd := exec.Command(quarkBin(), args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	// 编译校验（不输出运行结果——quietly 校验编译通过）
 	var errBuf strings.Builder
-	cmd.Stdout = &errBuf
-	cmd.Stderr = &errBuf
 	cmd.Stdout = io.Discard
+	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("编译失败: %s", strings.TrimSpace(errBuf.String()))
 	}
@@ -317,6 +339,22 @@ func cmdBuild(args []string, debug bool) {
 	_ = args
 	die(buildProject(debug))
 	fmt.Println("✓ 聚合完成；编译产物: bin/" + loadCup().Name)
+}
+
+// copyDir 递归复制目录（保留结构）。
+func copyDir(src, dst string) {
+	die(filepath.Walk(src, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		target := filepath.Join(dst, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		copyFile(p, target)
+		return nil
+	}))
 }
 
 func copyFile(src, dst string) {
@@ -381,7 +419,11 @@ func cmdInline(args []string) {
 				}
 			}
 			used[name] = true
-			die(os.Symlink(p, filepath.Join(out, name)))
+			abs, aerr := filepath.Abs(p)
+			if aerr != nil {
+				abs = p
+			}
+			die(os.Symlink(abs, filepath.Join(out, name)))
 			files = append(files, name)
 			return nil
 		}))

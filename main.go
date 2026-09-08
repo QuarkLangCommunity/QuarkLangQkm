@@ -358,11 +358,19 @@ func copyDir(src, dst string) {
 }
 
 func copyFile(src, dst string) {
+	fi, err := os.Stat(src)
+	if err != nil {
+		die(err)
+	}
+	mode := fi.Mode().Perm()
+	if mode == 0 {
+		mode = 0o644
+	}
 	b, err := os.ReadFile(src)
 	if err != nil {
 		die(err)
 	}
-	die(os.WriteFile(dst, b, 0o644))
+	die(os.WriteFile(dst, b, mode))
 }
 
 func quarkBin() string {

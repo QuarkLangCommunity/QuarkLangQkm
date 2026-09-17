@@ -18,9 +18,7 @@
 package main
 
 import (
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -84,6 +82,12 @@ func main() {
 		runDebug(*bp, fs.Args())
 	case "inline":
 		cmdInline(os.Args[2:])
+	case "fmt":
+		cmdFmt(os.Args[2:])
+	case "test":
+		cmdTest(os.Args[2:])
+	case "run":
+		cmdRun(os.Args[2:])
 	case "install":
 		cmdInstall(os.Args[2:])
 	case "update":
@@ -100,11 +104,20 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `qkm — QuarkLang 项目管理器
   qkm init                初始化项目（cup.json + src/main.qk）
   qkm build               聚合编译（下载/缓存依赖文件 → vendor → quark 编译）
+  qkm run [--native] [args...]   构建并运行（默认解释器；--native 走 qkc -run；--no-build 跳过构建）
+  qkm fmt [-w|-l|-d] [路径...]   格式化（默认 src/；-w 原地写 / -l 只列出 / -d 看差异）
+  qkm test [-v] [-run 正则] [-j N] [-L 目录] [目标...]   跑测试（默认 tests/，自动 -L src）
   qkm debug [-bp file:l]  调试模式（编译 + 断点运行；命令 c/n/p var/q）
   qkm inline <dir>... [-o out]   多目录视为单一目录编译（临时软链接平铺）
   qkm install             安装微服务三件（quark/qkc/qkd）或补全依赖（-deps）
   qkm update              刷新包元数据（不改文件：版本=可容纳上限，在线最新记录到 .qkm/registry）
-  qkm update-tools        工具链更新（重建 quark/qkc/qkd）`)
+  qkm update-tools        工具链更新（重建 quark/qkc/qkd）
+
+依赖获取（build/install/update 用）：
+  QKM_MIRROR=https://mirror.example.com   镜像前缀：github://owner/repo/path@ref
+                                          → <mirror>/owner/repo/<ref>/path（失败回落 GitHub）
+  QKM_OFFLINE=1                           离线：只用 .qkm/cache，绝不发起网络请求
+  工具定位：$QKM_QUARK / $QKM_QKFMT / $QKM_QKTEST / $QKM_QKC，其次 ./名字，最后 PATH`)
 }
 
 // ---------- init ----------
@@ -122,7 +135,7 @@ func cmdInit(args []string) {
 	cup := Cup{Name: name, Version: "0.1.0", QuarkVersion: "0.2", Dependencies: []Dep{}}
 	b, _ := json.MarshalIndent(cup, "", "  ")
 	die(os.WriteFile(filepath.Join(dir, cupFile), append(b, '\n'), 0o644))
-	mainQk := `fn main(io IOStream) {
+	mainQk := `fn main(IOStream io) void {
     io.println("hello from ` + name + `");
 }
 `
@@ -142,9 +155,20 @@ func loadCup() *Cup {
 	return &c
 }
 
-// fetchURL 拉取文件字节：https:// 直下；github://owner/repo/path 走 GitHub API contents（base64）。
+// fetchURL 拉取文件字节：github://owner/repo/path 走 GitHub API contents（base64）；
+// 配了 QKM_MIRROR 时优先走镜像，失败回落 GitHub；QKM_OFFLINE=1 时绝不发起网络请求。
 func fetchURL(url string, client *http.Client) ([]byte, error) {
 	if strings.HasPrefix(url, "github://") {
+		if m := mirrorURL(url); m != "" {
+			if b, err := httpGetBytes(m, client); err == nil {
+				return b, nil
+			} else if offlineMode() {
+				return nil, err
+			}
+		}
+		if offlineMode() {
+			return nil, fmt.Errorf("离线模式（QKM_OFFLINE=1）：未命中缓存，跳过网络请求 %s", url)
+		}
 		body := strings.TrimPrefix(url, "github://")
 		parts := strings.SplitN(body, "/", 3)
 		if len(parts) < 2 {
@@ -198,6 +222,19 @@ func fetchURL(url string, client *http.Client) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
+// httpGetBytes 简单 GET（镜像路径用；非 200 视为失败以便回落）。
+func httpGetBytes(url string, client *http.Client) ([]byte, error) {
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, url)
+	}
+	return io.ReadAll(resp.Body)
+}
+
 func decodeBase64(s string) ([]byte, error) {
 	s = strings.Map(func(r rune) rune {
 		if r == '\n' || r == '\r' {
@@ -209,13 +246,16 @@ func decodeBase64(s string) ([]byte, error) {
 }
 
 // downloadFile 并发下载（缓存：.qkm/cache/<hash>，sha256 校验）。
+// 缓存命中即零网络；QKM_OFFLINE=1 时**只**用缓存，未命中直接报错（不发起请求）。
 func downloadFile(url, dest string, client *http.Client) (string, error) {
-	sum := sha256.Sum256([]byte(url))
-	key := hex.EncodeToString(sum[:])[:12]
+	key := cacheKeyFor(url)
 	cache := filepath.Join(".qkm", "cache", key)
 	if b, err := os.ReadFile(cache); err == nil && len(b) > 0 {
 		os.WriteFile(dest, b, 0o644)
 		return key, nil // 缓存命中：零网络
+	}
+	if offlineMode() {
+		return "", fmt.Errorf("离线模式（QKM_OFFLINE=1）：未命中缓存 %s（缓存键 %s）", url, key)
 	}
 	b, err := fetchURL(url, client)
 	if err != nil {
@@ -510,6 +550,9 @@ func cmdInstall(args []string) {
 
 // installTools 工具链三件（quark/qkc/qkd）构建安装。
 func installTools() {
+	if offlineMode() {
+		die(fmt.Errorf("离线模式（QKM_OFFLINE=1）：工具链安装需要 git clone / go build，已跳过"))
+	}
 	if _, err := exec.LookPath("go"); err != nil {
 		die(fmt.Errorf("需要 Go（微服务从源码构建）"))
 	}
@@ -557,6 +600,10 @@ func runCmd(name string, args ...string) {
 func cmdUpdate() {
 	// 刷新在线元数据 → .qkm/registry（不改任何项目文件；cup.json version = 可容纳上限）
 	cup := loadCup()
+	if offlineMode() {
+		fmt.Println("离线模式（QKM_OFFLINE=1）：跳过在线元数据刷新，保留 .qkm/registry 现有内容")
+		return
+	}
 	client := &http.Client{Timeout: 15 * time.Second}
 	for _, d := range cup.Dependencies {
 		u := strings.TrimRight(d.URL, "/")

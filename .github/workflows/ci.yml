@@ -29,16 +29,22 @@ jobs:
         with:
           repository: QuarkLangCommunity/QuarkLangQkc
           path: QuarkLang
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 (qktest: the test runner the test template uses)
+        with:
+          repository: QuarkLangCommunity/QuarkLangQktest
+          path: QuarkLangQktest
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5 (SHA-pinned; dependabot updates weekly)
         with:
           go-version: '1.26'
-      - name: Build qkm and the interpreter
+      - name: Build qkm, the interpreter and the test runner
         run: |
           go build -o /tmp/qkm .
           (cd QuarkLang && go build -o /tmp/quark .)
+          (cd QuarkLangQktest && go build -o /tmp/qktest .)
       - name: app / cli / test templates run as documented
         env:
           QKM_QUARK: /tmp/quark
+          QKM_QKTEST: /tmp/qktest
         run: |
           set -euo pipefail
           work="$(mktemp -d)"

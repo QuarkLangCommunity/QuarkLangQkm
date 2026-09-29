@@ -1,0 +1,50 @@
+name: ci
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: build + unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 (SHA-pinned; dependabot updates weekly)
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5 (SHA-pinned; dependabot updates weekly)
+        with:
+          go-version: '1.26'
+      - run: go build ./... && go vet ./...
+      - run: go test ./... -count=1
+
+  templates:
+    name: templates end to end (against the language repo)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 (SHA-pinned; dependabot updates weekly)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 (the language repo: interpreter + tools are built, never vendored)
+        with:
+          repository: QuarkLangCommunity/QuarkLangQkc
+          path: QuarkLang
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5 (SHA-pinned; dependabot updates weekly)
+        with:
+          go-version: '1.26'
+      - name: Build qkm and the interpreter
+        run: |
+          go build -o /tmp/qkm .
+          (cd QuarkLang && go build -o /tmp/quark .)
+      - name: app / cli / test templates run as documented
+        env:
+          QKM_QUARK: /tmp/quark
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          cd "$work"
+          /tmp/qkm init -t app demo && (cd demo && /tmp/qkm run | grep -q 'hello from demo')
+          /tmp/qkm init -t cli cli && (cd cli && /tmp/qkm run -- alice --shout | grep -q 'hello, alice!')
+          /tmp/qkm init -t test t && (cd t && /tmp/qkm test | grep -q '1 passed, 0 failed')
+      - name: template listing is stable
+        run: /tmp/qkm init -list | grep -q '^  lib'

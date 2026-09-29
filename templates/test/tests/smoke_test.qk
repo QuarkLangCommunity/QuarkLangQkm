@@ -1,0 +1,10 @@
+// 冒烟测试：qkm test 默认跑 tests/，并自动把 src/ 加进 import 搜索路径。
+import "calc";
+
+fn main(IOStream io) void {
+    if (add(2, 3) != 5) {
+        io.println("FAIL add(2, 3)");
+        return;
+    }
+    io.println("PASS add(2, 3)");
+}

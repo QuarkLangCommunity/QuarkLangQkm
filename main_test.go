@@ -3,6 +3,7 @@ package main
 // qkm 单元测试：镜像地址映射、离线模式、缓存命中、参数拆分、工具定位。
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,5 +135,86 @@ func TestToolBinPrefersEnv(t *testing.T) {
 	t.Setenv("QKM_QKFMT", "")
 	if got := toolBin("qkfmt", "QKM_QKFMT"); got != "qkfmt" {
 		t.Errorf("无本地文件时应回落到 PATH 名字，got %q", got)
+	}
+}
+
+// ---------- 项目模板 ----------
+
+// TestInitTemplates 展开每个内嵌模板：cup.json 可用、没有残留占位符、确实写了文件。
+func TestInitTemplates(t *testing.T) {
+	names := templateNames()
+	if len(names) < 5 {
+		t.Fatalf("内嵌模板应有 app/cli/gui/lib/test，got %v", names)
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "demo")
+			cmdInit([]string{"-t", name, dir})
+
+			b, err := os.ReadFile(filepath.Join(dir, cupFile))
+			if err != nil {
+				t.Fatalf("cup.json: %v", err)
+			}
+			var cup Cup
+			if err := json.Unmarshal(b, &cup); err != nil {
+				t.Fatalf("cup.json 解析失败: %v", err)
+			}
+			if cup.Name != "demo" {
+				t.Errorf("项目名应为 demo，got %q", cup.Name)
+			}
+
+			files, qk := 0, 0
+			_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+				if err != nil || d.IsDir() {
+					return nil
+				}
+				files++
+				if strings.HasSuffix(p, ".qk") {
+					qk++
+				}
+				body, _ := os.ReadFile(p)
+				if strings.Contains(string(body), "{{name}}") || strings.Contains(p, "{{name}}") {
+					t.Errorf("占位符未替换: %s", p)
+				}
+				return nil
+			})
+			if files == 0 || qk == 0 {
+				t.Fatalf("模板 %s 应写出文件与 .qk（files=%d qk=%d）", name, files, qk)
+			}
+		})
+	}
+}
+
+// TestInitPlaceholderInFileName 模板文件名里的 {{name}} 也要替换（lib 模板的 src/{{name}}.qk）。
+func TestInitPlaceholderInFileName(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "mylib")
+	cmdInit([]string{"-t", "lib", dir})
+	if _, err := os.Stat(filepath.Join(dir, "src", "mylib.qk")); err != nil {
+		t.Fatalf("src/mylib.qk 应存在: %v", err)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, "src", "mylib.qk"))
+	if !strings.Contains(string(body), "hello from mylib") || !strings.Contains(string(body), "} mylib;") {
+		t.Errorf("内容应替换为项目名:\n%s", body)
+	}
+}
+
+// TestInitCustomTemplatesDir QKM_TEMPLATES 指向磁盘目录时用自定义模板（离线/镜像场景）。
+func TestInitCustomTemplatesDir(t *testing.T) {
+	root := t.TempDir()
+	die(os.MkdirAll(filepath.Join(root, "mini"), 0o755))
+	die(os.WriteFile(filepath.Join(root, "mini", "hello.qk"), []byte("// {{name}}\n"), 0o644))
+	t.Setenv("QKM_TEMPLATES", root)
+
+	if got := templateNames(); len(got) != 1 || got[0] != "mini" {
+		t.Fatalf("应只看到 mini，got %v", got)
+	}
+	dir := filepath.Join(t.TempDir(), "p1")
+	cmdInit([]string{"-t", "mini", dir})
+	body, err := os.ReadFile(filepath.Join(dir, "hello.qk"))
+	if err != nil {
+		t.Fatalf("hello.qk: %v", err)
+	}
+	if string(body) != "// p1\n" {
+		t.Errorf("占位符应替换为项目名，got %q", body)
 	}
 }

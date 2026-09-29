@@ -1,0 +1,14 @@
+// {{name}} 的测试：qkt 断言库（qkm test 默认跑 tests/，自动 -L src）。
+// 依赖 qkt 时：cup.json 里声明 qktest 依赖 → qkm build 落到 vendor/ → qkm test -L vendor
+// 或直接把 qkt.qk 放进本目录。
+import "qkt";
+import "{{name}}";
+
+fn main(IOStream io) void {
+    QktState st = qkt::setup(io);
+    qkt::eq(st, "greet", {{name}}::greet("world"), "hello from {{name}}, world");
+    Counter c = Counter::new(41);
+    qkt::eqInt(st, "bump returns 42", c.bump(), 42);
+    qkt::eqInt(st, "value is kept (reference semantics)", c.value(), 42);
+    qkt::report(st);
+}

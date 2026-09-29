@@ -1,0 +1,19 @@
+{
+  "name": "{{name}}",
+  "version": "0.1.0",
+  "quark": "0.2",
+  "dependencies": [
+    {
+      "name": "cleg",
+      "version": "1.0.0",
+      "url": "github://QuarkLangCommunity/QuarkLangLibs-Cleg@master",
+      "files": ["cleg.qk"]
+    },
+    {
+      "name": "style",
+      "version": "1.0.0",
+      "url": "github://QuarkLangCommunity/QuarkLangLibs-Style@master",
+      "files": ["style.qk"]
+    }
+  ]
+}

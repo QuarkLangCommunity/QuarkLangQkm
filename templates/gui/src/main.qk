@@ -1,0 +1,14 @@
+// {{name}} — GUI 项目骨架：cleg（GUI 框架）+ style（通用样式引擎），依赖已写进 cup.json。
+// qkm build 会把 cleg.qk / style.qk 拉到 vendor/ 并聚合到 bin/{{name}}/，import 保持原样。
+import "style";
+
+fn main(IOStream io) void {
+    // 样式引擎与渲染后端解耦：先在无窗口环境里把一条级联跑通，确认依赖可用。
+    HashTable<String, String> vars = HashTable::new();
+    vars.put("accent", "#34d3eb");
+    vars.put("radius", "12");
+    io.println("style engine ready: accent=" + vars.get("accent") + " radius=" + vars.get("radius"));
+
+    // 出窗口：见 QuarkLangLibs-Cleg/examples（cleg::init(w, h) + ClegFrame/ClegLabel + cleg::cleg_frame）。
+    // 例子需要 cleg.qk、json.qk 与 libclegrt.so 同目录；qkm build 后它们在 bin/{{name}}/ 里。
+}

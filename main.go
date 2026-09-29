@@ -102,7 +102,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `qkm — QuarkLang 项目管理器
-  qkm init                初始化项目（cup.json + src/main.qk）
+  qkm init [-t 模板] [-list] [目录]   初始化项目（默认模板 app；-list 列模板；模板可预置 cup.json/依赖）
   qkm build               聚合编译（下载/缓存依赖文件 → vendor → quark 编译）
   qkm run [--native] [args...]   构建并运行（默认解释器；--native 走 qkc -run；--no-build 跳过构建）
   qkm fmt [-w|-l|-d] [路径...]   格式化（默认 src/；-w 原地写 / -l 只列出 / -d 看差异）
@@ -117,30 +117,54 @@ func usage() {
   QKM_MIRROR=https://mirror.example.com   镜像前缀：github://owner/repo/path@ref
                                           → <mirror>/owner/repo/<ref>/path（失败回落 GitHub）
   QKM_OFFLINE=1                           离线：只用 .qkm/cache，绝不发起网络请求
-  工具定位：$QKM_QUARK / $QKM_QKFMT / $QKM_QKTEST / $QKM_QKC，其次 ./名字，最后 PATH`)
+  QKM_TEMPLATES=<dir>                     项目模板目录（默认内嵌模板；离线/自定义模板用）\n  工具定位：$QKM_QUARK / $QKM_QKFMT / $QKM_QKTEST / $QKM_QKC，其次 ./名字，最后 PATH`)
 }
 
 // ---------- init ----------
 
+// cmdInit 展开项目模板：qkm init [-t 模板] [-list] [目录]。
+// 模板来自内嵌 FS（或 QKM_TEMPLATES 指向的磁盘目录），文件名/内容里的 {{name}} 替换为项目名。
 func cmdInit(args []string) {
-	dir := "."
-	if len(args) > 0 {
-		dir = args[0]
+	tpl, dir := "app", "."
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-t", "--template":
+			if i+1 >= len(args) {
+				die(fmt.Errorf("%s 需要一个模板名（qkm init -list 查看）", args[i]))
+			}
+			tpl, i = args[i+1], i+1
+		case "-list", "--list":
+			fmt.Println("可用模板：")
+			for _, n := range templateNames() {
+				fmt.Printf("  %-6s %s\n", n, templateDescription(n))
+			}
+			return
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				die(fmt.Errorf("未知参数 %s（qkm init -list 查看模板）", args[i]))
+			}
+			dir = args[i]
+		}
 	}
-	die(os.MkdirAll(filepath.Join(dir, "src"), 0o755))
 	name := filepath.Base(dir)
-	if name == "." || name == string(filepath.Separator) {
+	if abs, err := filepath.Abs(dir); err == nil {
+		name = filepath.Base(abs)
+	}
+	if name == "." || name == string(filepath.Separator) || name == "" {
 		name = "app"
 	}
-	cup := Cup{Name: name, Version: "0.1.0", QuarkVersion: "0.2", Dependencies: []Dep{}}
-	b, _ := json.MarshalIndent(cup, "", "  ")
-	die(os.WriteFile(filepath.Join(dir, cupFile), append(b, '\n'), 0o644))
-	mainQk := `fn main(IOStream io) void {
-    io.println("hello from ` + name + `");
-}
-`
-	die(os.WriteFile(filepath.Join(dir, "src", "main.qk"), []byte(mainQk), 0o644))
-	fmt.Println("✓ 项目初始化:", name, "(cup.json + src/main.qk)")
+	files, err := materializeTemplate(tpl, dir, name)
+	die(err)
+	if _, err := os.Stat(filepath.Join(dir, cupFile)); err != nil {
+		cup := Cup{Name: name, Version: "0.1.0", QuarkVersion: "0.2", Dependencies: []Dep{}}
+		b, _ := json.MarshalIndent(cup, "", "  ")
+		die(os.WriteFile(filepath.Join(dir, cupFile), append(b, '\n'), 0o644))
+		files = append(files, cupFile)
+	}
+	fmt.Printf("✓ 项目初始化: %s（模板 %s）\n", name, tpl)
+	for _, f := range files {
+		fmt.Println("  " + f)
+	}
 }
 
 // ---------- build / 聚合 ----------
@@ -338,6 +362,21 @@ func buildProject(debug bool) error {
 	for _, f := range files {
 		copyFile(f.src, filepath.Join(binName, f.orb))
 	}
+	// 项目自身的其余 src 文件（模块/库文件）：同样进产物树并保留相对结构，
+	// 否则 main.qk 里 import 的同项目文件在 bin/ 下解析不到（assets/ 由下面的资源逻辑处理）
+	_ = filepath.WalkDir("src", func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, relErr := filepath.Rel("src", p)
+		if relErr != nil || rel == "." || rel == "main.qk" || rel == "assets" || strings.HasPrefix(rel, "assets"+string(filepath.Separator)) || d.IsDir() {
+			return nil
+		}
+		dst := filepath.Join(binName, rel)
+		die(os.MkdirAll(filepath.Dir(dst), 0o755))
+		copyFile(p, dst)
+		return nil
+	})
 	// assets 自动进树：src/assets 目录（存在即保留相对结构进 bin/<name>/，无需字段）
 	if fi, err := os.Stat(filepath.Join("src", "assets")); err == nil && fi.IsDir() {
 		copyDir(filepath.Join("src", "assets"), filepath.Join(binName, "assets"))

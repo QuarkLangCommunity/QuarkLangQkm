@@ -1,0 +1,8 @@
+// 库项目的演示入口：import 自己的库文件（qkm build 会把它与依赖聚合进 bin/<name>/）。
+import "{{name}}";
+
+fn main(IOStream io) void {
+    io.println({{name}}::greet("world"));
+    Counter c = Counter::new(41);
+    io.println("bump =", c.bump(), "value =", c.value());
+}

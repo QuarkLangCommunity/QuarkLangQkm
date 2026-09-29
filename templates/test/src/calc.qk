@@ -1,0 +1,4 @@
+// 被测代码：一个普通模块，import "calc" 即可使用（qkm test 自动把 src/ 加进搜索路径）。
+fn add(int a, int b) int {
+    return a + b;
+}

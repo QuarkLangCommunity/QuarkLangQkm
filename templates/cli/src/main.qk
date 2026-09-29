@@ -1,0 +1,26 @@
+// {{name}} — 命令行程序骨架：main 的 env/args 形参是可选的（位置固定：io, env, args）。
+fn usage(IOStream io) void {
+    io.println("usage: {{name}} <name> [--shout]");
+}
+
+fn main(IOStream io, HashTable<String, String> env, List<String> args) void {
+    if (args.size() == 0) {
+        usage(io);
+        return;
+    }
+    String name = args.get(0);
+    bool shout = false;
+    int i = 1;
+    while (i < args.size()) {
+        if (args.get(i) == "--shout") {
+            shout = true;
+        }
+        i = i + 1;
+    }
+    String msg = "hello, " + name;
+    if (shout) {
+        msg = msg + "!";
+    }
+    io.println(msg);
+    io.println("(env has " + env.size().toString() + " entries)");
+}

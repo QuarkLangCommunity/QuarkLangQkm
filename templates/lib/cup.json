@@ -1,0 +1,13 @@
+{
+  "name": "{{name}}",
+  "version": "0.1.0",
+  "quark": "0.2",
+  "dependencies": [
+    {
+      "name": "qkt",
+      "version": "1.0.0",
+      "url": "github://QuarkLangCommunity/QuarkLangQktest@master",
+      "files": ["qkt.qk"]
+    }
+  ]
+}

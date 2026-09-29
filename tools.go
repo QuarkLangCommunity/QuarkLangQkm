@@ -134,8 +134,12 @@ func cmdFmt(args []string) {
 func cmdTest(args []string) {
 	flags, targets := splitArgs(args, map[string]bool{"-L": true, "-run": true, "-j": true})
 	if !hasFlag(flags, "-L") {
-		if fi, err := os.Stat("src"); err == nil && fi.IsDir() {
-			flags = append(flags, "-L", "src")
+		// 默认搜索路径：src（项目自身模块）+ build（聚合树：cup.json 依赖用原文件名落在这里，
+		// 例如 qkt.qk）——这样 qkm build 之后 qkm test 不用手动 -L。
+		for _, d := range []string{"src", "build"} {
+			if fi, err := os.Stat(d); err == nil && fi.IsDir() {
+				flags = append(flags, "-L", d)
+			}
 		}
 	}
 	if len(targets) == 0 {
@@ -175,6 +179,10 @@ func cmdRun(args []string) {
 		default:
 			pass = append(pass, a)
 		}
+	}
+	// 约定：首个 -- 只是分隔符（qkm run -- alice），透传给程序时丢掉
+	if len(pass) > 0 && pass[0] == "--" {
+		pass = pass[1:]
 	}
 	cup := loadCup()
 	binDir := filepath.Join("bin", cup.Name)

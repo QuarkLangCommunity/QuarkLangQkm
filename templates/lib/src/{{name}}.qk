@@ -1,0 +1,23 @@
+// {{name}} — 库骨架：space 提供 {{name}}::fn 形式的空间函数，struct + impl 提供实例。
+// 库文件被使用方 import "{{name}}" 引入。
+space {
+    fn greet(String who) String {
+        return "hello from {{name}}, " + who;
+    }
+} {{name}};
+
+type struct { int value; } Counter;
+
+impl {
+    fn new(int v) Counter {
+        Counter c = .{value: v};
+        return c;
+    }
+    fn bump(Counter self) int {
+        self.value = self.value + 1;
+        return self.value;
+    }
+    fn value(Counter self) int {
+        return self.value;
+    }
+} Counter;

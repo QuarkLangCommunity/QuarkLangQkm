@@ -1,0 +1,4 @@
+// {{name}} — 入口。qkm run 默认走解释器，qkm run --native 走 qkc 原生编译。
+fn main(IOStream io) void {
+    io.println("hello from {{name}}");
+}

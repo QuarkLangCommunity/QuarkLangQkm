@@ -29,20 +29,44 @@
 ## 命令
 
 ```sh
-qkm init                 # 初始化（cup.json + src/main.qk）
+qkm init [-t 模板] [-list] [目录]   # 初始化（cup.json + 模板文件；模板：app/cli/lib/gui/test）
+                         #   模板里文件名与内容的 {{name}} 替换为项目名；模板自带 cup.json 时以模板为准（可预置依赖）
+                         #   QKM_TEMPLATES=<dir> 用磁盘上的自定义/镜像模板
 qkm build                # 聚合编译（cup.json `assets` 字段：src 相对路径/glob 任意文件随 bin/<name>/ 保留相对结构——
                          #   .so 动态库 / png / txt / 任意类型不限，权限随源文件）：并发下载（.qkm/cache 哈希缓存，命中零网络）
                          # → vendor/（files 隔离）→ build/ 聚合树 → quark 编译校验 → bin/<name>/（多文件产物：
                          #   main.qk + 库文件原名原位，import 保留；cd bin/<name> && quark main.qk 即运行）
 qkm debug [-bp 12]       # 调试：构建 + 断点运行（调用 qkd/quark 调试模式；c/n/p var/q）
 qkm run [--native] [args...]   # 构建并运行（默认解释器；--native 走 qkc -run；--no-build 跳过构建）
+                         #   首个 -- 只是分隔符：qkm run -- alice --shout → 程序收到 alice --shout
 qkm fmt [-w|-l|-d] [路径...]   # 格式化（默认 src/；-w 原地写 / -l 只列出（CI）/ -d 看差异）
-qkm test [-v] [-run 正则] [-j N] [-L 目录] [目标...]   # 跑测试（默认 tests/；未给 -L 时自动加 -L src）
+qkm test [-v] [-run 正则] [-j N] [-L 目录] [目标...]   # 跑测试（默认 tests/；未给 -L 时自动加 src/ 与 build/，
+                         #   后者是聚合树：cup.json 依赖以原文件名落在这里，import 无需手动 -L）
 qkm inline <dir>...     # 多目录视为单一目录编译：临时软链接平铺（.qkm/inline，-o 指定）
                          # （同名冲突自动唯一化；import 相对同目录正常解析）
 qkm update               # 刷新依赖版本（远程 cup.json 对比）
 qkm install              # 自动安装微服务三件：qkc / quark / qkd（$HOME/.local/bin）
 ```
+
+### 项目模板（qkm init）
+
+模板内嵌在二进制里（离线可用），`qkm init -list` 列出：
+
+| 模板 | 说明 | 初始化后的内容 |
+|---|---|---|
+| `app` | 最小可运行项目（默认） | `cup.json` + `src/main.qk` |
+| `cli` | 命令行骨架 | `main(IOStream io, HashTable<String,String> env, List<String> args)` + 参数解析 |
+| `lib` | 库骨架 | `src/{{name}}.qk`（space + struct/impl）、`src/main.qk` 演示入口、`tests/`（qkt）、cup.json 预置 qkt 依赖 |
+| `gui` | GUI 骨架 | `src/main.qk`（style 冒烟）、cup.json 预置 cleg + style 依赖 |
+| `test` | 被测代码 + 测试 | `src/calc.qk`、`src/main.qk`、`tests/smoke_test.qk` |
+
+```sh
+qkm init -t lib mylib     # mylib/src/mylib.qk、mylib/tests/mylib_test.qk（占位符全部替换）
+qkm init -t gui window    # cup.json 已带 cleg/style 依赖 → qkm build 直接拉取聚合
+QKM_TEMPLATES=~/my-tpls qkm init -t mine proj   # 自定义模板目录（离线/镜像）
+```
+
+每个模板的实际用法写在生成项目的 `README.md` 里；模板目录结构与占位符约定见 [`templates/README.md`](templates/README.md)。
 
 ### 工具定位（三条命令共用）
 

@@ -1,0 +1,6 @@
+// {{name}} — 入口（import 其余模块）。
+import "calc";
+
+fn main(IOStream io) void {
+    io.println("add(2, 3) =", add(2, 3));
+}
